@@ -20,9 +20,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 #include	"octree.h"
-#include	"density.h"
 
-// ----------------------------------------------------------------------------
+DistanceFunction g_distance_function = NULL;
+void * g_distance_data = NULL;
 
 const int MATERIAL_AIR = 0;
 const int MATERIAL_SOLID = 1;
@@ -30,22 +30,20 @@ const int MATERIAL_SOLID = 1;
 const float QEF_ERROR = 1e-6f;
 const int QEF_SWEEPS = 4;
 
-// ----------------------------------------------------------------------------
 
-const ivec3 CHILD_MIN_OFFSETS[] =
+const mu::Vec3 CHILD_MIN_OFFSETS[] =
 {
 	// needs to match the vertMap from Dual Contouring impl
-	ivec3( 0, 0, 0 ),
-	ivec3( 0, 0, 1 ),
-	ivec3( 0, 1, 0 ),
-	ivec3( 0, 1, 1 ),
-	ivec3( 1, 0, 0 ),
-	ivec3( 1, 0, 1 ),
-	ivec3( 1, 1, 0 ),
-	ivec3( 1, 1, 1 ),
+	mu::Vec3( 0, 0, 0 ),
+	mu::Vec3( 0, 0, 1 ),
+	mu::Vec3( 0, 1, 0 ),
+	mu::Vec3( 0, 1, 1 ),
+	mu::Vec3( 1, 0, 0 ),
+	mu::Vec3( 1, 0, 1 ),
+	mu::Vec3( 1, 1, 0 ),
+	mu::Vec3( 1, 1, 1 ),
 };
 
-// ----------------------------------------------------------------------------
 // data from the original DC impl, drives the contouring process
 
 const int edgevmap[12][2] = 
@@ -93,7 +91,6 @@ const int edgeProcEdgeMask[3][2][5] = {
 
 const int processEdgeMask[3][4] = {{3,2,1,0},{7,5,6,4},{11,10,9,8}} ;
 
-// -------------------------------------------------------------------------------
 
 OctreeNode* SimplifyOctree(OctreeNode* node, float threshold)
 {
@@ -146,8 +143,7 @@ OctreeNode* SimplifyOctree(OctreeNode* node, float threshold)
 	qef.solve(qefPosition, QEF_ERROR, QEF_SWEEPS, QEF_ERROR);
 	float error = qef.getError();
 
-	// convert to glm vec3 for ease of use
-	vec3 position(qefPosition.x, qefPosition.y, qefPosition.z);
+	mu::Vec3 position(qefPosition.x, qefPosition.y, qefPosition.z);
 
 	// at this point the masspoint will actually be a sum, so divide to make it the average
 	if (error > threshold)
@@ -156,16 +152,16 @@ OctreeNode* SimplifyOctree(OctreeNode* node, float threshold)
 		return node;
 	}
 
-	if (position.x < node->min.x || position.x > (node->min.x + node->size) ||
-		position.y < node->min.y || position.y > (node->min.y + node->size) ||
-		position.z < node->min.z || position.z > (node->min.z + node->size))
+	if (position.x() < node->min.x() || position.x() > (node->min.x() + node->size) ||
+		position.y() < node->min.y() || position.y() > (node->min.y() + node->size) ||
+		position.z() < node->min.z() || position.z() > (node->min.z() + node->size))
 	{
 		const auto& mp = qef.getMassPoint();
-		position = vec3(mp.x, mp.y, mp.z);
+		position = mu::Vec3(mp.x, mp.y, mp.z);
 	}
 
 	// change the node from an internal node to a 'psuedo leaf' node
-	OctreeDrawInfo* drawInfo = new OctreeDrawInfo;
+	OctreeDrawInfo* drawInfo = new OctreeDrawInfo();
 
 	for (int i = 0; i < 8; i++)
 	{
@@ -180,7 +176,7 @@ OctreeNode* SimplifyOctree(OctreeNode* node, float threshold)
 		}
 	}
 
-	drawInfo->averageNormal = vec3(0.f);
+	drawInfo->averageNormal = mu::Vec3(0.f);
 	for (int i = 0; i < 8; i++)
 	{
 		if (node->children[i])
@@ -194,7 +190,7 @@ OctreeNode* SimplifyOctree(OctreeNode* node, float threshold)
 		}
 	}
 
-	drawInfo->averageNormal = glm::normalize(drawInfo->averageNormal);
+	drawInfo->averageNormal = mu::normalize(drawInfo->averageNormal);
 	drawInfo->position = position;
 	drawInfo->qef = qef.getData();
 
@@ -210,9 +206,8 @@ OctreeNode* SimplifyOctree(OctreeNode* node, float threshold)
 	return node;
 }
 
-// ----------------------------------------------------------------------------
 
-void GenerateVertexIndices(OctreeNode* node, VertexBuffer& vertexBuffer)
+void GenerateVertexIndices(OctreeNode* node, std::vector< std::pair< mu::Vec3, mu::Vec3 > > & vertexBuffer )
 {
 	if (!node)
 	{
@@ -237,13 +232,12 @@ void GenerateVertexIndices(OctreeNode* node, VertexBuffer& vertexBuffer)
 		}
 
 		d->index = vertexBuffer.size();
-		vertexBuffer.push_back(MeshVertex(d->position, d->averageNormal));
+		vertexBuffer.push_back(std::pair< mu::Vec3, mu::Vec3 >(d->position, d->averageNormal));
 	}
 }
 
-// ----------------------------------------------------------------------------
 
-void ContourProcessEdge(OctreeNode* node[4], int dir, IndexBuffer& indexBuffer)
+void ContourProcessEdge(OctreeNode* node[4], int dir, std::vector< int >& indexBuffer)
 {
 	int minSize = 1000000;		// arbitrary big number
 	int minIndex = 0;
@@ -299,9 +293,8 @@ void ContourProcessEdge(OctreeNode* node[4], int dir, IndexBuffer& indexBuffer)
 	}
 }
 
-// ----------------------------------------------------------------------------
 
-void ContourEdgeProc(OctreeNode* node[4], int dir, IndexBuffer& indexBuffer)
+void ContourEdgeProc(OctreeNode* node[4], int dir, std::vector< int >& indexBuffer)
 {
 	if (!node[0] || !node[1] || !node[2] || !node[3])
 	{
@@ -345,9 +338,8 @@ void ContourEdgeProc(OctreeNode* node[4], int dir, IndexBuffer& indexBuffer)
 	}
 }
 
-// ----------------------------------------------------------------------------
 
-void ContourFaceProc(OctreeNode* node[2], int dir, IndexBuffer& indexBuffer)
+void ContourFaceProc(OctreeNode* node[2], int dir, std::vector< int >& indexBuffer)
 {
 	if (!node[0] || !node[1])
 	{
@@ -416,9 +408,8 @@ void ContourFaceProc(OctreeNode* node[2], int dir, IndexBuffer& indexBuffer)
 	}
 }
 
-// ----------------------------------------------------------------------------
 
-void ContourCellProc(OctreeNode* node, IndexBuffer& indexBuffer)
+void ContourCellProc(OctreeNode* node, std::vector< int >& indexBuffer)
 {
 	if (node == NULL)
 	{
@@ -464,9 +455,8 @@ void ContourCellProc(OctreeNode* node, IndexBuffer& indexBuffer)
 	}
 }
 
-// ----------------------------------------------------------------------------
 
-vec3 ApproximateZeroCrossingPosition(const vec3& p0, const vec3& p1)
+mu::Vec3 ApproximateZeroCrossingPosition(const mu::Vec3& p0, const mu::Vec3& p1)
 {
 	// approximate the zero crossing by finding the min value along the edge
 	float minValue = 100000.f;
@@ -476,8 +466,8 @@ vec3 ApproximateZeroCrossingPosition(const vec3& p0, const vec3& p1)
 	const float increment = 1.f / (float)steps;
 	while (currentT <= 1.f)
 	{
-		const vec3 p = p0 + ((p1 - p0) * currentT);
-		const float density = glm::abs(Density_Func(p));
+		const mu::Vec3 p = p0 + ((p1 - p0) * currentT);
+		const float density = fabs(g_distance_function(p,g_distance_data));
 		if (density < minValue)
 		{
 			minValue = density;
@@ -490,19 +480,17 @@ vec3 ApproximateZeroCrossingPosition(const vec3& p0, const vec3& p1)
 	return p0 + ((p1 - p0) * t);
 }
 
-// ----------------------------------------------------------------------------
 
-vec3 CalculateSurfaceNormal(const vec3& p)
+mu::Vec3 CalculateSurfaceNormal(const mu::Vec3& p)
 {
 	const float H = 0.001f;
-	const float dx = Density_Func(p + vec3(H, 0.f, 0.f)) - Density_Func(p - vec3(H, 0.f, 0.f));
-	const float dy = Density_Func(p + vec3(0.f, H, 0.f)) - Density_Func(p - vec3(0.f, H, 0.f));
-	const float dz = Density_Func(p + vec3(0.f, 0.f, H)) - Density_Func(p - vec3(0.f, 0.f, H));
+	const float dx = g_distance_function(p + mu::Vec3(H, 0.f, 0.f), g_distance_data) - g_distance_function(p - mu::Vec3(H, 0.f, 0.f), g_distance_data);
+	const float dy = g_distance_function(p + mu::Vec3(0.f, H, 0.f), g_distance_data) - g_distance_function(p - mu::Vec3(0.f, H, 0.f), g_distance_data);
+	const float dz = g_distance_function(p + mu::Vec3(0.f, 0.f, H), g_distance_data) - g_distance_function(p - mu::Vec3(0.f, 0.f, H), g_distance_data);
 
-	return glm::normalize(vec3(dx, dy, dz));
+	return mu::normalize(mu::Vec3(dx, dy, dz));
 }
 
-// ----------------------------------------------------------------------------
 
 OctreeNode* ConstructLeaf(OctreeNode* leaf)
 {
@@ -514,8 +502,8 @@ OctreeNode* ConstructLeaf(OctreeNode* leaf)
 	int corners = 0;
 	for (int i = 0; i < 8; i++)
 	{
-		const ivec3 cornerPos = leaf->min + CHILD_MIN_OFFSETS[i];
-		const float density = Density_Func(vec3(cornerPos));
+		const mu::Vec3 cornerPos = leaf->min + CHILD_MIN_OFFSETS[i];
+		const float density = g_distance_function(mu::Vec3(cornerPos), g_distance_data);
 		const int material = density < 0.f ? MATERIAL_SOLID : MATERIAL_AIR;
 		corners |= (material << i);
 	}
@@ -530,7 +518,7 @@ OctreeNode* ConstructLeaf(OctreeNode* leaf)
 	// otherwise the voxel contains the surface, so find the edge intersections
 	const int MAX_CROSSINGS = 6;
 	int edgeCount = 0;
-	vec3 averageNormal(0.f);
+	mu::Vec3 averageNormal(0.f);
 	svd::QefSolver qef;
 
 	for (int i = 0; i < 12 && edgeCount < MAX_CROSSINGS; i++)
@@ -548,11 +536,11 @@ OctreeNode* ConstructLeaf(OctreeNode* leaf)
 			continue;
 		}
 
-		const vec3 p1 = vec3(leaf->min + CHILD_MIN_OFFSETS[c1]);
-		const vec3 p2 = vec3(leaf->min + CHILD_MIN_OFFSETS[c2]);
-		const vec3 p = ApproximateZeroCrossingPosition(p1, p2);
-		const vec3 n = CalculateSurfaceNormal(p);
-		qef.add(p.x, p.y, p.z, n.x, n.y, n.z);
+		const mu::Vec3 p1 = mu::Vec3(leaf->min + CHILD_MIN_OFFSETS[c1]);
+		const mu::Vec3 p2 = mu::Vec3(leaf->min + CHILD_MIN_OFFSETS[c2]);
+		const mu::Vec3 p = ApproximateZeroCrossingPosition(p1, p2);
+		const mu::Vec3 n = CalculateSurfaceNormal(p);
+		qef.add(p.x(), p.y(), p.z(), n.x(), n.y(), n.z());
 
 		averageNormal += n;
 
@@ -562,21 +550,21 @@ OctreeNode* ConstructLeaf(OctreeNode* leaf)
 	svd::Vec3 qefPosition;
 	qef.solve(qefPosition, QEF_ERROR, QEF_SWEEPS, QEF_ERROR);
 
-	OctreeDrawInfo* drawInfo = new OctreeDrawInfo;
-	drawInfo->position = vec3(qefPosition.x, qefPosition.y, qefPosition.z);
+	OctreeDrawInfo* drawInfo = new OctreeDrawInfo();
+	drawInfo->position = mu::Vec3(qefPosition.x, qefPosition.y, qefPosition.z);
 	drawInfo->qef = qef.getData();
 
-	const vec3 min = vec3(leaf->min);
-	const vec3 max = vec3(leaf->min + ivec3(leaf->size));
-	if (drawInfo->position.x < min.x || drawInfo->position.x > max.x ||
-		drawInfo->position.y < min.y || drawInfo->position.y > max.y ||
-		drawInfo->position.z < min.z || drawInfo->position.z > max.z)
+	const mu::Vec3 min = mu::Vec3(leaf->min);
+	const mu::Vec3 max = mu::Vec3(leaf->min + mu::Vec3(leaf->size));
+	if (drawInfo->position.x() < min.x() || drawInfo->position.x() > max.x() ||
+		drawInfo->position.y() < min.y() || drawInfo->position.y() > max.y() ||
+		drawInfo->position.z() < min.z() || drawInfo->position.z() > max.z())
 	{
 		const auto& mp = qef.getMassPoint();
-		drawInfo->position = vec3(mp.x, mp.y, mp.z);
+		drawInfo->position = mu::Vec3(mp.x, mp.y, mp.z);
 	}
 
-	drawInfo->averageNormal = glm::normalize(averageNormal / (float)edgeCount);
+	drawInfo->averageNormal = normalize(averageNormal / (float)edgeCount);
 	drawInfo->corners = corners;
 
 	leaf->type = Node_Leaf;
@@ -585,7 +573,6 @@ OctreeNode* ConstructLeaf(OctreeNode* leaf)
 	return leaf;
 }
 
-// -------------------------------------------------------------------------------
 
 OctreeNode* ConstructOctreeNodes(OctreeNode* node)
 {
@@ -622,24 +609,27 @@ OctreeNode* ConstructOctreeNodes(OctreeNode* node)
 	return node;
 }
 
-// -------------------------------------------------------------------------------
 
-OctreeNode* BuildOctree(const ivec3& min, const int size, const float threshold)
+OctreeNode* BuildOctree(const mu::Vec3& min, const int size, const float threshold, DistanceFunction f, void * d )
 {
-	OctreeNode* root = new OctreeNode;
+  g_distance_function = f;
+  g_distance_data = d;
+
+  OctreeNode* root = new OctreeNode;
 	root->min = min;
 	root->size = size;
 	root->type = Node_Internal;
 
-	ConstructOctreeNodes(root);
-	root = SimplifyOctree(root, threshold);
+	root = ConstructOctreeNodes(root);
+  if( root != nullptr ){
+    root = SimplifyOctree(root, threshold);
+  }
 
 	return root;
 }
 
-// ----------------------------------------------------------------------------
 
-void GenerateMeshFromOctree(OctreeNode* node, VertexBuffer& vertexBuffer, IndexBuffer& indexBuffer)
+void GenerateMeshFromOctree(OctreeNode* node, std::vector< std::pair< mu::Vec3, mu::Vec3 > > & vertexBuffer, std::vector< int > & indexBuffer)
 {
 	if (!node)
 	{
@@ -653,7 +643,6 @@ void GenerateMeshFromOctree(OctreeNode* node, VertexBuffer& vertexBuffer, IndexB
 	ContourCellProc(node, indexBuffer);
 }
 
-// -------------------------------------------------------------------------------
 
 void DestroyOctree(OctreeNode* node)
 {
@@ -674,5 +663,3 @@ void DestroyOctree(OctreeNode* node)
 
 	delete node;
 }
-
-// -------------------------------------------------------------------------------

@@ -20,17 +20,19 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 
-#ifndef		HAS_OCTREE_H_BEEN_INCLUDED
-#define		HAS_OCTREE_H_BEEN_INCLUDED
+#ifndef		OCTREE_H
+#define		OCTREE_H
 
 #include "qef.h"
-#include "mesh.h"
 
-#include <glm/glm.hpp>
-using glm::vec3;
-using glm::ivec3;
+#include <vector>
 
-// ----------------------------------------------------------------------------
+#include <vector>
+#include <utility>
+
+#include <mathutils.h>
+
+typedef float (*DistanceFunction)( const mu::Vec3 &, void * );
 
 enum OctreeNodeType
 {
@@ -40,7 +42,6 @@ enum OctreeNodeType
 	Node_Leaf,
 };
 
-// ----------------------------------------------------------------------------
 
 struct OctreeDrawInfo 
 {
@@ -52,12 +53,12 @@ struct OctreeDrawInfo
 
 	int				index;
 	int				corners;
-	vec3			position;
-	vec3			averageNormal;
+	mu::Vec3			position;
+	mu::Vec3			averageNormal;
 	svd::QefData	qef;
 };
 
-// ----------------------------------------------------------------------------
+
 
 class OctreeNode
 {
@@ -88,19 +89,15 @@ public:
 	}
 
 	OctreeNodeType	type;
-	ivec3			min;
+	mu::Vec3 		min;
 	int				size;
 	OctreeNode*		children[8];
-	OctreeDrawInfo*	drawInfo;
+	OctreeDrawInfo* drawInfo;
 };
 
-// ----------------------------------------------------------------------------
-
-OctreeNode* BuildOctree(const ivec3& min, const int size, const float threshold);
+OctreeNode* BuildOctree(const mu::Vec3 & min, const int size, const float threshold, DistanceFunction f, void * data );
 void DestroyOctree(OctreeNode* node);
-void GenerateMeshFromOctree(OctreeNode* node, VertexBuffer& vertexBuffer, IndexBuffer& indexBuffer);
+void GenerateMeshFromOctree( OctreeNode* node, std::vector< std::pair< mu::Vec3, mu::Vec3 > > & vertexBuffer, std::vector< int > & indexBuffer );
 
-// ----------------------------------------------------------------------------
-
-#endif	// HAS_OCTREE_H_BEEN_INCLUDED
+#endif	// OCTREE_H
 
